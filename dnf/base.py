@@ -684,6 +684,8 @@ class Base(object):
         ts = self.history.rpm
         all_obsoleted = set(goal.list_obsoleted())
         installonly_query = self._get_installonly_query()
+        installonly_query.apply()
+        installonly_query_installed = installonly_query.installed().apply()
 
         for pkg in goal.list_downgrades():
             obs = goal.obsoleted_by_package(pkg)
@@ -715,11 +717,11 @@ class Base(object):
 
             reason = goal.get_reason(pkg)
 
-            if pkg in installonly_query:
-                reason_installonly = ts.get_reason(pkg)
-                if libdnf.transaction.TransactionItemReasonCompare(
-                        reason, reason_installonly) == -1:
-                    reason = reason_installonly
+            #  Inherit reason if package is installonly an package with same name is installed
+            #  Use the same logic like upgrade
+            #  Upgrade of installonly packages result in install or install and remove step
+            if pkg in installonly_query and installonly_query_installed.filter(name=pkg.name):
+                reason = ts.get_reason(pkg)
 
             # inherit the best reason from obsoleted packages
             for obsolete in obs:
@@ -756,10 +758,18 @@ class Base(object):
                 ts.add_upgrade(pkg, upgraded, obs)
                 self._ds_callback.pkg_added(upgraded, 'ud')
             self._ds_callback.pkg_added(pkg, 'u')
-        for pkg in goal.list_erasures():
-            self._ds_callback.pkg_added(pkg, 'e')
-            reason = goal.get_reason(pkg)
-            ts.add_erase(pkg, reason)
+        erasures = goal.list_erasures()
+        if erasures:
+            remaining_installed_query = self.sack.query(flags=hawkey.IGNORE_EXCLUDES).installed()
+            remaining_installed_query.filterm(pkg__neq=erasures)
+            for pkg in erasures:
+                if remaining_installed_query.filter(name=pkg.name):
+                    remaining = remaining_installed_query[0]
+                    ts.get_reason(remaining)
+                    self.history.set_reason(remaining, ts.get_reason(remaining))
+                self._ds_callback.pkg_added(pkg, 'e')
+                reason = goal.get_reason(pkg)
+                ts.add_erase(pkg, reason)
         return ts
 
     def _query_matches_installed(self, q):
@@ -2489,7 +2499,7 @@ class Base(object):
 
     def _get_installonly_query(self, q=None):
         if q is None:
-            q = self._sack.query()
+            q = self._sack.query(flags=hawkey.IGNORE_EXCLUDES)
         installonly = q.filter(provides=self.conf.installonlypkgs)
         return installonly
 
