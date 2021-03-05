@@ -580,7 +580,7 @@ class ModuleBase(object):
         return profiles_str[:-2]
 
     def _summary_report_formatter(self, summary):
-        return summary.strip().replace("\n"," ")
+        return summary.strip().replace("\n", " ")
 
     def _module_strs_formatter(self, modulePackage, markActive=False):
         default_str = ""
